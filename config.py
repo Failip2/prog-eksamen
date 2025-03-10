@@ -6,6 +6,14 @@
 # Movement constants
 PLAYER_SPEED = 5
 
+# Terrain Conditions
+CHUNK_SIZE = 150
+TILE_SIZE = 10
+
+
+#UI Constants
+ZOOM_FACTOR = 1
+
 
 # Run Conditions
 GAME_IS_RUNNING = True
