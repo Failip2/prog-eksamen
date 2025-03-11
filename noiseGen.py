@@ -3,12 +3,12 @@ import pygame
 
 # ------------- GLOBAL GRADIENTS ---------------
 gradients = {}  # (ix, iy) -> (gx, gy)
-WORLD_SEED = 42
+WORLD_SEED = random.randint(1, 696969)
 
 def get_gradient(ix, iy):
     if (ix, iy) in gradients:
         return gradients[(ix, iy)]
-    int_seed = hash((ix, iy, 42))  # -> integer
+    int_seed = hash((ix, iy, WORLD_SEED))  # -> integer
     rnd = random.Random(int_seed)
     angle = rnd.random() * 2 * math.pi
     gx, gy = math.cos(angle), math.sin(angle)
