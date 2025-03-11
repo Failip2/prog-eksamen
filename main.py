@@ -47,7 +47,8 @@ loaded_chunks = {}
 def generate_island_surface(cx, cy, chunk_w=50, chunk_h=50, tile_size=10, scale=15.0):
     offset_x = cx * chunk_w  # chunk coords -> tile offset
     offset_y = cy * chunk_h
-    biome = noiseGen.get_biome_map(chunk_w, chunk_h, scale, offset_x, offset_y)
+    biome_data = noiseGen.get_biome_map(chunk_w,chunk_h, scale, 
+                                        offset_x, offset_y)
 
     chunk_pixel_w = chunk_w * tile_size
     chunk_pixel_h = chunk_h * tile_size
@@ -56,18 +57,19 @@ def generate_island_surface(cx, cy, chunk_w=50, chunk_h=50, tile_size=10, scale=
     for j in range(chunk_h):
         for i in range(chunk_w):
             rect = pygame.Rect(i*tile_size, j*tile_size, tile_size, tile_size)
-            surf.fill(biome[j][i], rect)
+            surf.fill(biome_data[j][i], rect)
 
     chunk_rect = pygame.Rect(cx*chunk_pixel_w, cy*chunk_pixel_h, chunk_pixel_w, chunk_pixel_h)
-    return surf, chunk_rect
+    return surf, chunk_rect, biome_data
 
 
 class Chunk:
-    def __init__(self, cx, cy, surface, rect):
+    def __init__(self, cx, cy, surface, rect, biome_data):
         self.cx = cx
         self.cy = cy
         self.surface = surface
         self.rect = rect
+        self.biome_data = biome_data
 
 
 class ChunkManager:
@@ -96,7 +98,7 @@ class ChunkManager:
         if (cx, cy) in self.chunks:
             return self.chunks[(cx, cy)]
         else:
-            surface, rect = generate_island_surface(
+            surface, rect, biome_data = generate_island_surface(
                 cx=cx,
                 cy=cy,
                 chunk_w=self.chunk_width_tiles,
@@ -104,7 +106,7 @@ class ChunkManager:
                 tile_size=self.tile_size,
                 scale=self.scale,
             )
-            new_chunk = Chunk(cx, cy, surface, rect)
+            new_chunk = Chunk(cx, cy, surface, rect, biome_data)
             self.chunks[(cx, cy)] = new_chunk
             return new_chunk
 
@@ -138,7 +140,7 @@ class ChunkManager:
             if zoom != 1.0:
                 scaled_w = int(chunk.rect.width * zoom)
                 scaled_h = int(chunk.rect.height * zoom)
-                scaled_surf = pygame.transform.smoothscale(chunk.surface, (scaled_w, scaled_h))
+                scaled_surf = pygame.transform.scale(chunk.surface, (scaled_w, scaled_h))
                 zoomSurf.blit(scaled_surf, (screen_x, screen_y))
             else:
                 # no scaling needed
@@ -176,7 +178,7 @@ testGroup.add(island_surf)
 ########################################
 # 2) Create a 'player' sprite
 ########################################
-testSurf = surface.Surface("assets/img/zomb.png", (300, 300), testGroup, playerGroup)
+testSurf = surface.Surface("assets/img/zomb.png", (100, 100), testGroup, playerGroup)
 testSurf.original_image = testSurf.image.copy()
 testSurf.scaled_image = testSurf.original_image.copy()
 # Place the player in the world
@@ -251,6 +253,21 @@ def draw_all():
     for t in surface.textSurface.instances:
         zoomSurf.blit(t.image, t.rect)
 
+
+
+
+
+
+########################################
+# PyGame Custom Userevents
+########################################
+zombie_spawn_event = pygame.USEREVENT+1
+pygame.time.set_timer(zombie_spawn_event, 1000)
+
+
+
+
+
 ########################################
 # Main Loop
 ########################################
@@ -271,6 +288,10 @@ while c.GAME_IS_RUNNING:
                 c.ZOOM_FACTOR += 0.05
                 # Only re-scale once, not every frame
                 rescale_all(c.ZOOM_FACTOR)
+        
+        elif event.type == zombie_spawn_event:
+            pass
+            
 
     # Handle movement in world coords
     keys = pygame.key.get_pressed()
@@ -289,7 +310,12 @@ while c.GAME_IS_RUNNING:
 
     cx = testSurf.world_x // chunk_pixel_w
     cy = testSurf.world_y // chunk_pixel_h
-    chunk_manager.get_chunk(cx, cy)
+    pchunk = chunk_manager.get_chunk(cx, cy)
+
+    """local_x = (testSurf.world_x % chunk_pixel_w) // tile_size
+    local_y = (testSurf.world_y % chunk_pixel_h) // tile_size
+
+    biome = pchunk.biome_data[local_y][local_x]"""
 
     for nx in [cx-2, cx-1, cx, cx+1, cx+2]:
         for ny in [cy-2, cy-1, cy, cy+1, cy+2]:
@@ -301,6 +327,7 @@ while c.GAME_IS_RUNNING:
     
     # Blit the result to the screen
     screen.blit(zoomSurf, (0,0))
+    #screen.blit(s, (0,0))
 
     # Update text surfaces
     for t in surface.textSurface.instances:
