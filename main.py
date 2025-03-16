@@ -6,6 +6,7 @@ from collections import Counter
 import noiseGen
 import math
 from pygame.locals import *
+import random
 
 pygame.init()
 pygame.font.init()
@@ -38,21 +39,17 @@ scale = 10.0
 biome_map = noiseGen.get_biome_map(map_width, map_height, scale)
 
 # Sprite groups
-island_group = pygame.sprite.RenderUpdates()
 playerGroup = pygame.sprite.RenderUpdates()
-testGroup = pygame.sprite.RenderUpdates()
 
-loaded_chunks = {}
-
-def generate_island_surface(cx, cy, chunk_w=50, chunk_h=50, tile_size=10, scale=15.0):
+def generate_island_surface(cx, cy, chunk_w=50, chunk_h=50, tile_size=10, scale=15.0, isBiomeMap=True):
     offset_x = cx * chunk_w  # chunk coords -> tile offset
     offset_y = cy * chunk_h
-    biome_data = noiseGen.get_biome_map(chunk_w,chunk_h, scale, 
-                                        offset_x, offset_y)
+    biome_data, collision_map = noiseGen.get_biome_map(chunk_w,chunk_h, scale, 
+                                        offset_x, offset_y, isBiomeMap=isBiomeMap)
 
     chunk_pixel_w = chunk_w * tile_size
     chunk_pixel_h = chunk_h * tile_size
-    surf = pygame.Surface((chunk_pixel_w, chunk_pixel_h))
+    surf = pygame.Surface((chunk_pixel_w, chunk_pixel_h)).convert_alpha()
 
     for j in range(chunk_h):
         for i in range(chunk_w):
@@ -60,21 +57,22 @@ def generate_island_surface(cx, cy, chunk_w=50, chunk_h=50, tile_size=10, scale=
             surf.fill(biome_data[j][i], rect)
 
     chunk_rect = pygame.Rect(cx*chunk_pixel_w, cy*chunk_pixel_h, chunk_pixel_w, chunk_pixel_h)
-    return surf, chunk_rect, biome_data
+    return surf, chunk_rect, biome_data, collision_map
 
 
 class Chunk:
-    def __init__(self, cx, cy, surface, rect, biome_data):
+    def __init__(self, cx, cy, surface, rect, biome_data, collision_map):
         self.cx = cx
         self.cy = cy
         self.surface = surface
         self.rect = rect
         self.biome_data = biome_data
+        self.collision_map = collision_map 
 
 
 class ChunkManager:
     def __init__(self, chunk_width_tiles=50, chunk_height_tiles=50,
-                 tile_size=10, scale=15.0, seed=None):
+                 tile_size=10, scale=15.0, seed=None, isBiomeMap=True):
         """
         :param chunk_width_tiles: # of tiles horizontally in each chunk
         :param chunk_height_tiles: # of tiles vertically in each chunk
@@ -87,6 +85,7 @@ class ChunkManager:
         self.tile_size = tile_size
         self.scale = scale
         self.seed = seed
+        self.isBiomeMap = isBiomeMap
 
         # Stores (cx, cy) -> Chunk instance
         self.chunks = {}
@@ -98,15 +97,16 @@ class ChunkManager:
         if (cx, cy) in self.chunks:
             return self.chunks[(cx, cy)]
         else:
-            surface, rect, biome_data = generate_island_surface(
+            surface, rect, biome_data, collision_map = generate_island_surface(
                 cx=cx,
                 cy=cy,
                 chunk_w=self.chunk_width_tiles,
                 chunk_h=self.chunk_height_tiles,
                 tile_size=self.tile_size,
                 scale=self.scale,
+                isBiomeMap=self.isBiomeMap
             )
-            new_chunk = Chunk(cx, cy, surface, rect, biome_data)
+            new_chunk = Chunk(cx, cy, surface, rect, biome_data, collision_map)
             self.chunks[(cx, cy)] = new_chunk
             return new_chunk
 
@@ -147,47 +147,31 @@ class ChunkManager:
                 zoomSurf.blit(chunk.surface, (screen_x, screen_y))
 
 
+def random_point_on_circle(center_x, center_y, radius):
+    """
+    Returns (x, y) coordinates on the circumference of 
+    a circle of radius `radius` centered at (center_x, center_y).
+    """
+    angle = random.random() * 2 * math.pi
+    x = center_x + radius * math.cos(angle)
+    y = center_y + radius * math.sin(angle)
+    return (x, y)
+
+
 chunk_manager = ChunkManager(chunk_width_tiles=50, chunk_height_tiles=50,
                                  tile_size=10, scale=150.0, seed=42)
-
-########################################
-# 1) Build a big tile-based island
-########################################
-island_surface_full = pygame.Surface((info.current_w, info.current_h))
-for j in range(map_height):
-    for i in range(map_width):
-        color = biome_map[j][i]
-        rect = pygame.Rect(i * tile_size, j * tile_size, tile_size, tile_size)
-        island_surface_full.fill(color, rect)
-
-# Our island background
-island_surf = surface.RectSprite(0, 0, info.current_w, info.current_h, (0,0,0))
-# Keep an original_image for high-quality scaling
-island_surf.original_image = island_surface_full.copy()
-island_surf.scaled_image = island_surf.original_image.copy()  # We'll store the scaled version
-island_surf.image = island_surf.scaled_image  # Optional usage
-island_surf.rect = island_surf.scaled_image.get_rect(center=screen_center)
-
-# Assign world position for the island's top-left
-island_surf.world_x = 0
-island_surf.world_y = 0
-
-island_group.add(island_surf)
-testGroup.add(island_surf)
+obstacle_manager = ChunkManager(chunk_width_tiles=50, chunk_height_tiles=50,
+                                 tile_size=10, scale=10.0, seed=42, isBiomeMap=False)
 
 ########################################
 # 2) Create a 'player' sprite
 ########################################
-testSurf = surface.Surface("assets/img/zomb.png", (100, 100), testGroup, playerGroup)
-testSurf.original_image = testSurf.image.copy()
-testSurf.scaled_image = testSurf.original_image.copy()
-# Place the player in the world
-w_bg, h_bg = island_surf.original_image.get_size()
-testSurf.world_x = w_bg // 2
-testSurf.world_y = h_bg // 2
+testSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
+
+zombSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
 
 # For demonstration, a text surface
-testText = surface.textSurface(testGroup)
+testText = surface.textSurface()
 
 ########################################
 # Initialize zoom
@@ -203,11 +187,6 @@ def rescale_all(zoom):
     This is called only when zoom changes.
     """
     # Scale island background
-    w_orig = island_surf.original_image.get_width()
-    h_orig = island_surf.original_image.get_height()
-    new_w = int(w_orig * zoom)
-    new_h = int(h_orig * zoom)
-    island_surf.scaled_image = pygame.transform.scale(island_surf.original_image, (new_w, new_h))
 
     # Scale each sprite in playerGroup
     for sp in playerGroup.sprites():
@@ -227,6 +206,8 @@ def draw_all():
     """
     zoomSurf.fill((0,0,0))
     chunk_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=1)
+    obstacle_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=1)
+
     # If there's no player, just draw the island plainly
     players = list(playerGroup.sprites())
     
@@ -264,6 +245,9 @@ def draw_all():
 zombie_spawn_event = pygame.USEREVENT+1
 pygame.time.set_timer(zombie_spawn_event, 1000)
 
+game_tick_event = pygame.USEREVENT+2
+pygame.time.set_timer(game_tick_event, math.floor(1000/60))
+
 
 
 
@@ -290,19 +274,23 @@ while c.GAME_IS_RUNNING:
                 rescale_all(c.ZOOM_FACTOR)
         
         elif event.type == zombie_spawn_event:
-            pass
+            world_x, world_y = random_point_on_circle(testSurf.world_x, testSurf.world_y, 500)
+            surface.Surface("assets/img/zomb.png", (100, 100), world_x, world_y, playerGroup)
+            
+        elif event.type == game_tick_event:
+            keys = pygame.key.get_pressed()
+            if keys[K_UP]:
+                testSurf.world_y += charControls[K_UP][1]
+            if keys[K_DOWN]:
+                testSurf.world_y += charControls[K_DOWN][1]
+            if keys[K_LEFT]:
+                testSurf.world_x += charControls[K_LEFT][0]
+            if keys[K_RIGHT]:
+                testSurf.world_x += charControls[K_RIGHT][0]
             
 
     # Handle movement in world coords
-    keys = pygame.key.get_pressed()
-    if keys[K_UP]:
-        testSurf.world_y += charControls[K_UP][1]
-    if keys[K_DOWN]:
-        testSurf.world_y += charControls[K_DOWN][1]
-    if keys[K_LEFT]:
-        testSurf.world_x += charControls[K_LEFT][0]
-    if keys[K_RIGHT]:
-        testSurf.world_x += charControls[K_RIGHT][0]
+
 
 
     chunk_pixel_w = chunk_manager.chunk_width_tiles * chunk_manager.tile_size
@@ -310,16 +298,23 @@ while c.GAME_IS_RUNNING:
 
     cx = testSurf.world_x // chunk_pixel_w
     cy = testSurf.world_y // chunk_pixel_h
-    pchunk = chunk_manager.get_chunk(cx, cy)
+    #pchunk = chunk_manager.get_chunk(cx, cy)
+    #obs_chunk = obstacle_manager.get_chunk(cx, cy)
 
-    """local_x = (testSurf.world_x % chunk_pixel_w) // tile_size
+    local_x = (testSurf.world_x % chunk_pixel_w) // tile_size
     local_y = (testSurf.world_y % chunk_pixel_h) // tile_size
 
-    biome = pchunk.biome_data[local_y][local_x]"""
+    #biome = pchunk.biome_data[local_y][local_x] 
+    #collision_map = obs_chunk.collision_map[local_y][local_x]
+    #print(pchunk.collision_map)
+
+    #print(collision_map)
+    #print(biome)
 
     for nx in [cx-2, cx-1, cx, cx+1, cx+2]:
         for ny in [cy-2, cy-1, cy, cy+1, cy+2]:
             chunk_manager.get_chunk(nx, ny)
+            obstacle_manager.get_chunk(nx, ny)
 
     # Build the frame
     draw_all()

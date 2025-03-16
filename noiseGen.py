@@ -70,7 +70,28 @@ def assign_biome(value):
     elif value < 0.3: return (34,139,34) # grass
     else: return (139,137,137)          # mountain
 
-def get_biome_map(map_width=50, map_height=50, scale=15.0, offset_x=0, offset_y=0):
+def assign_obstacle(value):
+    if value < -0.45: return (0, 255, 10)
+    if value < -0.35: return (200, 0, 100)
+    else: return (0,0,0,0)
+
+def get_biome_map(map_width=50, map_height=50, scale=15.0, offset_x=0, offset_y=0, isBiomeMap=True):
+    def get_biome_loop(func):
+        biome_map = []
+        collision_map = []
+        for j in range(map_height):
+            row = []
+            collision_row = []
+            for i in range(map_width):
+                color = func(noise_values[j][i])
+                row.append(color)
+                is_blocked = False
+                is_blocked = (color == (0, 255, 10) or color == (200, 0, 100))
+                collision_row.append(is_blocked)
+            biome_map.append(row)
+            collision_map.append(collision_row)
+        return biome_map, collision_map
+
     # Get the perlin noise
     noise_values = generate_perlin_noise(
         width=map_width,
@@ -79,12 +100,10 @@ def get_biome_map(map_width=50, map_height=50, scale=15.0, offset_x=0, offset_y=
         offset_x=offset_x,
         offset_y=offset_y
     )
+    if isBiomeMap:
+        biome_data, collision_map = get_biome_loop(assign_biome)
+        return biome_data, collision_map
+    
+    biome_data, collision_map = get_biome_loop(assign_obstacle)
+    return biome_data, collision_map
     # Convert noise to biome colors
-    biome_map = []
-    for j in range(map_height):
-        row = []
-        for i in range(map_width):
-            color = assign_biome(noise_values[j][i])
-            row.append(color)
-        biome_map.append(row)
-    return biome_map
