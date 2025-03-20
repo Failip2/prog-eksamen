@@ -281,8 +281,6 @@ pathfinder = Pathfinder(obstacle_manager, obstacle_manager.chunk_height_tiles, o
 ########################################
 testSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
 
-zombSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
-
 # For demonstration, a text surface
 testText = surface.textSurface()
 
@@ -348,7 +346,14 @@ def move_player(player, dx, dy, chunk_manager):
         # Collides
         pass
 
-import math
+def get_angle(x, y):
+    """
+    Returns the angle (in degrees) for the triangle sides x and y,
+    i.e. the angle of the vector (x, y) relative to the positive X-axis.
+    """
+    angle_radians = math.atan2(y, x)      # angle in radians between -π and π
+    angle_degrees = math.degrees(angle_radians)
+    return angle_degrees
 
 def circle_vs_aabb(cx, cy, r, box_x, box_y, box_w, box_h):
     """
@@ -390,7 +395,7 @@ def update_zombie_movement():
     for zombie in zombListTest:
         zombie_position = (zombie.world_x, zombie.world_y)
         # Determine if we need to update the path for this zombie
-        if zombie.path is None or not zombie.path: 
+        if zombie.path == [] or not zombie.path: 
             # no current path, compute one
             zombie.path = pathfinder.find_path(zombie_position, player_pos)
             zombie.target_last_seen = player_pos
@@ -548,7 +553,7 @@ pygame.time.set_timer(game_tick_event, math.floor(1000/60))
 
 
 
-
+testBool = True
 
 ########################################
 # Main Loop
@@ -567,9 +572,10 @@ while c.GAME_IS_RUNNING:
         elif event.type == pygame.KEYUP:
             # Press SPACE to zoom in
             if event.key == pygame.K_SPACE:
-                c.ZOOM_FACTOR += 0.05
+                pass
+                #c.ZOOM_FACTOR += 0.05
                 # Only re-scale once, not every frame
-                rescale_all(c.ZOOM_FACTOR)
+                #rescale_all(c.ZOOM_FACTOR)
         
         elif event.type == zombie_spawn_event:
             if len(zombListTest)<20:
@@ -605,7 +611,18 @@ while c.GAME_IS_RUNNING:
     local_y = (testSurf.world_y % chunk_pixel_h) // tile_size
 
     mouse_x, mouse_y = pygame.mouse.get_pos()
-    print(mouse_x-1/2*info.current_w, mouse_y-1/2*info.current_h)
+    ang = get_angle(mouse_x-1/2*info.current_w, mouse_y-1/2*info.current_h)
+    testSurf.scaled_image = pygame.transform.rotate(testSurf.original_image, -ang-90)
+    
+    #print(ang)
+    #testSurf.image = pygame.transform.rotate(testSurf.image, ang)
+    if testBool:
+        print("cuh")
+        
+        
+        testBool = False
+    
+
 
     # ... rest of game loop ...
 
