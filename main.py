@@ -25,10 +25,10 @@ screen_center = (info.current_w // 2, info.current_h // 2)
 zoomSurf = pygame.Surface((info.current_w, info.current_h))
 
 charControls = {
-    K_UP: (0, -c.PLAYER_SPEED),
-    K_DOWN: (0, c.PLAYER_SPEED),
-    K_RIGHT: (c.PLAYER_SPEED, 0),
-    K_LEFT: (-c.PLAYER_SPEED, 0)
+    K_w: (0, -c.PLAYER_SPEED),
+    K_s: (0, c.PLAYER_SPEED),
+    K_d: (c.PLAYER_SPEED, 0),
+    K_a: (-c.PLAYER_SPEED, 0)
 }
 
 tile_size = 10
@@ -385,6 +385,36 @@ def circle_vs_aabb(cx, cy, r, box_x, box_y, box_w, box_h):
     py = ny * overlap
     return (px, py)
 
+def update_zombie_movement():
+    player_pos = (testSurf.world_x, testSurf.world_y)
+    for zombie in zombListTest:
+        zombie_position = (zombie.world_x, zombie.world_y)
+        # Determine if we need to update the path for this zombie
+        if zombie.path is None or not zombie.path: 
+            # no current path, compute one
+            zombie.path = pathfinder.find_path(zombie_position, player_pos)
+            zombie.target_last_seen = player_pos
+        else:
+            # If player has moved far from last seen position or at regular intervals, recompute path
+            dist_to_last = math.hypot(player_pos[0] - zombie.target_last_seen[0],
+                                       player_pos[1] - zombie.target_last_seen[1])
+            if dist_to_last > 125:  # example threshold in tiles
+                zombie.path = pathfinder.find_path(zombie_position, player_pos)
+                zombie.target_last_seen = player_pos
+
+        # If a path exists, move the zombie along the path
+        if zombie.path:
+            next_tile = zombie.path[0]
+            next_tile_world = (next_tile[0]*10, next_tile[1]*10)
+            # Move zombie towards next_tile (instant move or interpolate movement here)
+
+            dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED)
+            
+            zombie.world_x += dx
+            zombie.world_y += dy
+            # If reached the next tile, remove it from path
+            if zombie_position == next_tile_world:
+                zombie.path.pop(0)
 
 def move_circle_player(player, dx, dy, chunk_manager, passes=5):
     """
@@ -542,10 +572,11 @@ while c.GAME_IS_RUNNING:
                 rescale_all(c.ZOOM_FACTOR)
         
         elif event.type == zombie_spawn_event:
-            world_x, world_y = random_point_on_circle(testSurf.world_x, testSurf.world_y, 500)
-            new_zomb = surface.Surface("assets/img/zomb.png", (100, 100), world_x, world_y, playerGroup)
-            new_zomb.path = None
-            zombListTest.append(new_zomb)
+            if len(zombListTest)<20:
+                world_x, world_y = random_point_on_circle(testSurf.world_x, testSurf.world_y, 500)
+                new_zomb = surface.Surface("assets/img/zomb.png", (100, 100), world_x, world_y, playerGroup)
+                new_zomb.path = None
+                zombListTest.append(new_zomb)
             
         elif event.type == game_tick_event:
             keys = pygame.key.get_pressed()
@@ -555,6 +586,7 @@ while c.GAME_IS_RUNNING:
                     dx+=v[0]
                     dy+=v[1]
             move_circle_player(testSurf, dx, dy, obstacle_manager)
+            update_zombie_movement()
             
 
     # Handle movement in world coords
@@ -572,35 +604,9 @@ while c.GAME_IS_RUNNING:
     local_x = (testSurf.world_x % chunk_pixel_w) // tile_size
     local_y = (testSurf.world_y % chunk_pixel_h) // tile_size
 
-    player_pos = (testSurf.world_x, testSurf.world_y)
-    for zombie in zombListTest:
-        zombie_position = (zombie.world_x, zombie.world_y)
-        # Determine if we need to update the path for this zombie
-        if zombie.path is None or not zombie.path: 
-            # no current path, compute one
-            zombie.path = pathfinder.find_path(zombie_position, player_pos)
-            zombie.target_last_seen = player_pos
-        else:
-            # If player has moved far from last seen position or at regular intervals, recompute path
-            dist_to_last = math.hypot(player_pos[0] - zombie.target_last_seen[0],
-                                       player_pos[1] - zombie.target_last_seen[1])
-            if dist_to_last > 5:  # example threshold in tiles
-                zombie.path = pathfinder.find_path(zombie_position, player_pos)
-                zombie.target_last_seen = player_pos
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+    print(mouse_x-1/2*info.current_w, mouse_y-1/2*info.current_h)
 
-        # If a path exists, move the zombie along the path
-        if zombie.path:
-            next_tile = zombie.path[0]
-            next_tile_world = (next_tile[0]*10, next_tile[1]*10)
-            # Move zombie towards next_tile (instant move or interpolate movement here)
-
-            dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED)
-            
-            zombie.world_x += dx
-            zombie.world_y += dy
-            # If reached the next tile, remove it from path
-            if zombie_position == next_tile_world:
-                zombie.path.pop(0)
     # ... rest of game loop ...
 
     #biome = pchunk.biome_data[local_y][local_x] 
