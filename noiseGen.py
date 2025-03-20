@@ -65,15 +65,15 @@ def generate_perlin_noise(width, height, scale=15.0, offset_x=0, offset_y=0):
     return noise_grid
 
 def assign_biome(value):
-    if value < -0.3: return (0, 0, 150)   # deep water
-    elif value < 0.0: return (0, 0, 255) # shallow
-    elif value < 0.3: return (34,139,34) # grass
-    else: return (139,137,137)          # mountain
+    if value < -0.3: return (0, 0, 150), False   # deep water
+    elif value < 0.0: return (0, 0, 255), False # shallow
+    elif value < 0.3: return (34,139,34), False # grass
+    else: return (139,137,137), False          # mountain
 
 def assign_obstacle(value):
-    if value < -0.45: return (0, 255, 10)
-    if value < -0.35: return (200, 0, 100)
-    else: return (0,0,0,0)
+    if value < -0.45: return (0, 100, 100, 200), True
+    if value < -0.35: return (0, 100, 100, 200), True
+    else: return (0,0,0,0), False
 
 def get_biome_map(map_width=50, map_height=50, scale=15.0, offset_x=0, offset_y=0, isBiomeMap=True):
     def get_biome_loop(func):
@@ -83,10 +83,8 @@ def get_biome_map(map_width=50, map_height=50, scale=15.0, offset_x=0, offset_y=
             row = []
             collision_row = []
             for i in range(map_width):
-                color = func(noise_values[j][i])
+                color, is_blocked = func(noise_values[j][i])
                 row.append(color)
-                is_blocked = False
-                is_blocked = (color == (0, 255, 10) or color == (200, 0, 100))
                 collision_row.append(is_blocked)
             biome_map.append(row)
             collision_map.append(collision_row)
