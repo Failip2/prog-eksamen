@@ -140,6 +140,7 @@ class ChunkManager:
             # or just do one big scale if the chunk is large.
             # We'll do a naive approach for demonstration:
             if zoom != 1.0:
+                print("cuh")
                 scaled_w = int(chunk.rect.width * zoom)
                 scaled_h = int(chunk.rect.height * zoom)
                 scaled_surf = pygame.transform.scale(chunk.surface, (scaled_w, scaled_h))
@@ -279,15 +280,14 @@ pathfinder = Pathfinder(obstacle_manager, obstacle_manager.chunk_height_tiles, o
 ########################################
 # 2) Create a 'player' sprite
 ########################################
+gun_surf = surface.Surface("assets/img/ak47.png", (25, 112.5), info.current_w // 2, info.current_h // 2, playerGroup)
+
 testSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
+
+gun_surf.rect.midbottom = (testSurf.world_x, testSurf.world_y)
 
 # For demonstration, a text surface
 testText = surface.textSurface()
-
-########################################
-# Initialize zoom
-########################################
-c.ZOOM_FACTOR = 1.0
 
 ########################################
 # Function to scale everything ONCE
@@ -413,7 +413,7 @@ def update_zombie_movement():
             next_tile_world = (next_tile[0]*10, next_tile[1]*10)
             # Move zombie towards next_tile (instant move or interpolate movement here)
 
-            dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED)
+            dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED+random.randint(0, 7))
             
             zombie.world_x += dx
             zombie.world_y += dy
@@ -434,7 +434,7 @@ def move_circle_player(player, dx, dy, chunk_manager, passes=5):
     # 1) Predict new center
     cx = player.world_x + dx
     cy = player.world_y + dy
-    r  =40  # or a fixed 50 if that’s your circle radius
+    r = 35  # or a fixed 50 if that’s your circle radius
 
     # We'll do multiple passes for corner sliding
     for _ in range(passes):
@@ -517,7 +517,7 @@ def draw_all():
     
 
     # We'll use the first player as the camera anchor
-    player = players[0]
+    player = testSurf
     camera_x = player.world_x
     camera_y = player.world_y
 
@@ -540,8 +540,6 @@ def draw_all():
 
 
 
-
-
 ########################################
 # PyGame Custom Userevents
 ########################################
@@ -550,10 +548,6 @@ pygame.time.set_timer(zombie_spawn_event, 1000)
 
 game_tick_event = pygame.USEREVENT+2
 pygame.time.set_timer(game_tick_event, math.floor(1000/60))
-
-
-
-testBool = True
 
 ########################################
 # Main Loop
@@ -592,6 +586,8 @@ while c.GAME_IS_RUNNING:
                     dx+=v[0]
                     dy+=v[1]
             move_circle_player(testSurf, dx, dy, obstacle_manager)
+            gun_surf.world_x = testSurf.world_x+30
+            gun_surf.world_y = testSurf.world_y-20
             update_zombie_movement()
             
 
@@ -616,11 +612,6 @@ while c.GAME_IS_RUNNING:
     
     #print(ang)
     #testSurf.image = pygame.transform.rotate(testSurf.image, ang)
-    if testBool:
-        print("cuh")
-        
-        
-        testBool = False
     
 
 

@@ -12,7 +12,7 @@ TILE_SIZE = 10
 
 
 #UI Constants
-ZOOM_FACTOR = 1
+ZOOM_FACTOR = 1.5
 
 
 # Run Conditions
