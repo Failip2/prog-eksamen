@@ -20,11 +20,11 @@ class Surface(SpriteHandler):
             pygame.image.load(imageUrl).convert_alpha(),
             size
         )
+        self.world_x = world_x
+        self.world_y = world_y
         self.rect = self.image.get_rect()
         self.original_image = self.image.copy()
         self.scaled_image = self.original_image.copy()
-        self.world_x = world_x
-        self.world_y = world_y
 
 class RectSprite(SpriteHandler):
     def __init__(self, x, y, w, h, color, *groups, **kwargs):

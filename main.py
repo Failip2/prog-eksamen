@@ -8,6 +8,7 @@ import math
 from pygame.locals import *
 import random
 import heapq
+import music
 
 pygame.init()
 pygame.font.init()
@@ -71,6 +72,103 @@ class Chunk:
         self.biome_data = biome_data
         self.collision_map = collision_map 
 
+class Bullet(pygame.sprite.Sprite):
+    def __init__(self, x, y, angle, speed, bullet_size = 5):
+        super().__init__()
+        self.image = pygame.Surface((bullet_size, bullet_size))  # Bullet size
+        self.image.fill((255, 0, 0))  # Red bullet for simplicity
+        self.radius = bullet_size/2
+        self.scaled_image = self.image
+        self.world_x = x
+        self.world_y = y
+        self.rect = self.image.get_rect()
+        self.angle = angle
+        self.speed = speed
+        self.dx = speed * math.cos(math.radians(angle))
+        self.dy = speed * math.sin(math.radians(angle))
+
+    def update(self):
+        # Move the bullet
+        new_pos_x = self.world_x + self.dx
+        new_pos_y = self.world_y + self.dy
+
+        # Check if the next position is walkable
+        if not can_move_to(new_pos_x, new_pos_y, obstacle_manager):
+            self.kill()  # Kill the bullet if it hits an obstacle
+            return
+        
+        for zomb in zombie_manager.zomb_list:
+            if circle_collision(zomb, self):
+                zombie_manager.zomb_list.remove(zomb)
+                zomb.kill()
+                self.kill()
+
+        # If no collision, update the position
+        self.world_x += self.dx
+        self.world_y += self.dy
+
+class BulletManager:
+    def __init__(self):
+        self.bullets = pygame.sprite.Group()
+
+    def shoot(self, x, y, angle, speed):
+        bullet = Bullet(x, y, angle, speed)
+        self.bullets.add(bullet)
+
+    def update(self):
+        self.bullets.update()
+
+class Zombie(surface.Surface):
+    def __init__(self, imageUrl, size, world_x, world_y, radius, *groups):
+        super().__init__(imageUrl, size, world_x, world_y, *groups)
+        self.world_x = world_x
+        self.world_y = world_y 
+
+        self.radius = radius
+        self.path = None
+        #zombListTest.append(new_zomb)
+
+class ZombieManager:
+    def __init__(self):
+        self.zomb_list = []
+
+    def add_zombie(self, x, y, zombie=None):
+        if zombie is None:
+            self.zomb_list.append(Zombie("assets/img/zomb.png", (c.ZOMBIE_RADIUS*2, c.ZOMBIE_RADIUS*2), x, y, c.ZOMBIE_RADIUS, playerGroup))
+            return
+        
+        self.zomb_list.append(zombie)
+    
+    def update_zombie_movement(self):
+        player_pos = (testSurf.world_x, testSurf.world_y)
+        for zombie in self.zomb_list:
+            zombie_position = (zombie.world_x, zombie.world_y)
+            # Determine if we need to update the path for this zombie
+            if zombie.path == [] or not zombie.path: 
+                # no current path, compute one
+                zombie.path = pathfinder.find_path(zombie_position, player_pos)
+                zombie.target_last_seen = player_pos
+            else:
+                # If player has moved far from last seen position or at regular intervals, recompute path
+                dist_to_last = math.hypot(player_pos[0] - zombie.target_last_seen[0],
+                                        player_pos[1] - zombie.target_last_seen[1])
+                if dist_to_last > 125:  # example threshold in tiles
+                    zombie.path = pathfinder.find_path(zombie_position, player_pos)
+                    zombie.target_last_seen = player_pos
+
+            # If a path exists, move the zombie along the path
+            if zombie.path:
+                next_tile = zombie.path[0]
+                next_tile_world = (next_tile[0]*10, next_tile[1]*10)
+                # Move zombie towards next_tile (instant move or interpolate movement here)
+
+                dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED+random.randint(0, 7))
+                
+                zombie.world_x += dx
+                zombie.world_y += dy
+                # If reached the next tile, remove it from path
+                if zombie_position == next_tile_world:
+                    zombie.path.pop(0)
 
 class ChunkManager:
     def __init__(self, chunk_width_tiles=50, chunk_height_tiles=50,
@@ -140,7 +238,6 @@ class ChunkManager:
             # or just do one big scale if the chunk is large.
             # We'll do a naive approach for demonstration:
             if zoom != 1.0:
-                print("cuh")
                 scaled_w = int(chunk.rect.width * zoom)
                 scaled_h = int(chunk.rect.height * zoom)
                 scaled_surf = pygame.transform.scale(chunk.surface, (scaled_w, scaled_h))
@@ -149,6 +246,25 @@ class ChunkManager:
                 # no scaling needed
                 zoomSurf.blit(chunk.surface, (screen_x, screen_y))
 
+def circle_collision(spriteA, spriteB):
+    """
+    Returns True if spriteA and spriteB collide based on their circular bounding boxes.
+    The sprites should have the attributes: world_x, world_y, and radius.
+    
+    :param spriteA: First sprite
+    :param spriteB: Second sprite
+    :return: True if the circles overlap (collide), False otherwise
+    """
+    # Calculate the distance between the centers of the two circles
+    dx = spriteB.world_x - spriteA.world_x
+    dy = spriteB.world_y - spriteA.world_y
+    distance = math.sqrt(dx**2 + dy**2)
+
+    # Get the sum of the radii of both circles
+    radius_sum = spriteA.radius + spriteB.radius
+
+    # If the distance is less than or equal to the sum of the radii, they are colliding
+    return distance <= radius_sum
 
 def random_point_on_circle(center_x, center_y, radius):
     """
@@ -276,6 +392,9 @@ obstacle_manager = ChunkManager(chunk_width_tiles=50, chunk_height_tiles=50,
 
 pathfinder = Pathfinder(obstacle_manager, obstacle_manager.chunk_height_tiles, obstacle_manager.tile_size)
 
+bullet_manager = BulletManager()
+
+zombie_manager = ZombieManager()
 
 ########################################
 # 2) Create a 'player' sprite
@@ -285,6 +404,9 @@ gun_surf = surface.Surface("assets/img/ak47.png", (25, 112.5), info.current_w //
 testSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
 
 gun_surf.rect.midbottom = (testSurf.world_x, testSurf.world_y)
+
+musicTest = music.MusicWithQueue("main")
+musicTest.playMusic()
 
 # For demonstration, a text surface
 testText = surface.textSurface()
@@ -308,43 +430,27 @@ def rescale_all(zoom):
         sp.scaled_image = pygame.transform.smoothscale(sp.original_image, (nw, nh))
 
 
-def can_move_to(player_x, player_y, chunk_manager):
+def can_move_to(obj_x, obj_y, chunk_manager):
     # 1) Identify chunk coords
     chunk_pixel_w = chunk_manager.chunk_width_tiles * chunk_manager.tile_size
     chunk_pixel_h = chunk_manager.chunk_height_tiles * chunk_manager.tile_size
 
-    cx = player_x // chunk_pixel_w
-    cy = player_y // chunk_pixel_h
+    cx = obj_x // chunk_pixel_w
+    cy = obj_y // chunk_pixel_h
 
     chunk = chunk_manager.get_chunk(cx, cy)
     if not chunk:
         return False  # if chunk not loaded or out of range?
 
     # 2) local tile coords
-    local_x = (player_x % chunk_pixel_w) // chunk_manager.tile_size
-    local_y = (player_y % chunk_pixel_h) // chunk_manager.tile_size
+    local_x = int((obj_x % chunk_pixel_w) // chunk_manager.tile_size)
+    local_y = int((obj_y % chunk_pixel_h) // chunk_manager.tile_size)
 
     # 3) check collision
     if chunk.collision_map[local_y][local_x]:
         # It's blocked
         return False
     return True
-
-def move_player(player, dx, dy, chunk_manager):
-    if dx == 0 and dy == 0:
-        print("no movement")
-        return
-    new_x = player.world_x + dx
-    new_y = player.world_y + dy
-
-    # Optionally check all corners if you do bounding-box collision
-    if can_move_to(new_x, new_y, chunk_manager):
-        # It's free, so move
-        player.world_x = new_x
-        player.world_y = new_y
-    else:
-        # Collides
-        pass
 
 def get_angle(x, y):
     """
@@ -390,36 +496,37 @@ def circle_vs_aabb(cx, cy, r, box_x, box_y, box_w, box_h):
     py = ny * overlap
     return (px, py)
 
-def update_zombie_movement():
-    player_pos = (testSurf.world_x, testSurf.world_y)
-    for zombie in zombListTest:
-        zombie_position = (zombie.world_x, zombie.world_y)
-        # Determine if we need to update the path for this zombie
-        if zombie.path == [] or not zombie.path: 
-            # no current path, compute one
-            zombie.path = pathfinder.find_path(zombie_position, player_pos)
-            zombie.target_last_seen = player_pos
-        else:
-            # If player has moved far from last seen position or at regular intervals, recompute path
-            dist_to_last = math.hypot(player_pos[0] - zombie.target_last_seen[0],
-                                       player_pos[1] - zombie.target_last_seen[1])
-            if dist_to_last > 125:  # example threshold in tiles
-                zombie.path = pathfinder.find_path(zombie_position, player_pos)
-                zombie.target_last_seen = player_pos
 
-        # If a path exists, move the zombie along the path
-        if zombie.path:
-            next_tile = zombie.path[0]
-            next_tile_world = (next_tile[0]*10, next_tile[1]*10)
-            # Move zombie towards next_tile (instant move or interpolate movement here)
 
-            dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED+random.randint(0, 7))
-            
-            zombie.world_x += dx
-            zombie.world_y += dy
-            # If reached the next tile, remove it from path
-            if zombie_position == next_tile_world:
-                zombie.path.pop(0)
+
+def update_gun_position(player, gun_surf, rotation_angle, offset_distance=30):
+    """
+    Updates the gun's position relative to the player and rotates the gun to face the player's direction.
+
+    Parameters:
+    - player: The player object (assumed to have `world_x` and `world_y` attributes).
+    - gun_surf: The gun surface object (assumed to have `original_image`, `image`, and `rect` attributes).
+    - rotation_angle: The angle in radians (the direction the player is facing).
+    - offset_distance: The distance the gun should be offset from the player (default 30).
+    """
+    
+    # Get the player's position
+    player_x, player_y = player.world_x, player.world_y
+    gun_surf.angle = rotation_angle-90
+
+    # Calculate the gun's position based on the player's position and rotation
+    gun_offset_x = offset_distance * math.cos(math.radians(rotation_angle))
+    gun_offset_y = offset_distance * math.sin(math.radians(rotation_angle))
+
+    # Update the gun's world position
+    gun_surf.world_x = player_x + gun_offset_x
+    gun_surf.world_y = player_y + gun_offset_y
+
+    # Rotate the gun image to match the player's facing direction
+    rotated_image = pygame.transform.rotate(gun_surf.original_image, -rotation_angle)
+
+    # Update the gun's surface
+    gun_surf.scaled_image = rotated_image
 
 def move_circle_player(player, dx, dy, chunk_manager, passes=5):
     """
@@ -507,23 +614,8 @@ def draw_all():
     Compose the island background, player(s), etc. onto zoomSurf.
     The player is the camera center so it stays near screen_center.
     """
-    zoomSurf.fill((0,0,0))
-    chunk_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=1)
-    obstacle_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=1)
 
-    # If there's no player, just draw the island plainly
-    players = list(playerGroup.sprites())
-    
-    
-
-    # We'll use the first player as the camera anchor
-    player = testSurf
-    camera_x = player.world_x
-    camera_y = player.world_y
-
-
-    # 2) Draw each sprite in playerGroup
-    for sp in playerGroup.sprites():
+    def scale_and_blit_zoom_surface(sp):
         sw = sp.scaled_image.get_width()
         sh = sp.scaled_image.get_height()
         off_x = (sp.world_x - camera_x) * c.ZOOM_FACTOR
@@ -532,6 +624,23 @@ def draw_all():
         sx = screen_center[0] + off_x - sw / 2
         sy = screen_center[1] + off_y - sh / 2
         zoomSurf.blit(sp.scaled_image, (sx, sy))
+
+    zoomSurf.fill((0,0,0))
+    chunk_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=c.ZOOM_FACTOR)
+    obstacle_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=c.ZOOM_FACTOR)
+    
+    # We'll use the first player as the camera anchor
+    player = testSurf
+    camera_x = player.world_x
+    camera_y = player.world_y
+
+
+    for sp in bullet_manager.bullets.sprites():
+        scale_and_blit_zoom_surface(sp)
+
+    # 2) Draw each sprite in playerGroup
+    for sp in playerGroup.sprites():
+        scale_and_blit_zoom_surface(sp)
 
     # 3) Draw text
     for t in surface.textSurface.instances:
@@ -566,17 +675,17 @@ while c.GAME_IS_RUNNING:
         elif event.type == pygame.KEYUP:
             # Press SPACE to zoom in
             if event.key == pygame.K_SPACE:
-                pass
+                bullet_manager.shoot(gun_surf.world_x, gun_surf.world_y, gun_surf.angle, 10)  # shoot bullets
+                
+                """Example of how the zoom function could work"""
                 #c.ZOOM_FACTOR += 0.05
                 # Only re-scale once, not every frame
                 #rescale_all(c.ZOOM_FACTOR)
         
         elif event.type == zombie_spawn_event:
-            if len(zombListTest)<20:
-                world_x, world_y = random_point_on_circle(testSurf.world_x, testSurf.world_y, 500)
-                new_zomb = surface.Surface("assets/img/zomb.png", (100, 100), world_x, world_y, playerGroup)
-                new_zomb.path = None
-                zombListTest.append(new_zomb)
+            if len(Zombie.instances)<c.ZOMBIES_PER_WAVE:
+                world_x, world_y = random_point_on_circle(testSurf.world_x, testSurf.world_y, c.ZOMBIE_SPAWN_DISTANCE)
+                zombie_manager.add_zombie(world_x, world_y)
             
         elif event.type == game_tick_event:
             keys = pygame.key.get_pressed()
@@ -585,10 +694,9 @@ while c.GAME_IS_RUNNING:
                 if keys[k]:
                     dx+=v[0]
                     dy+=v[1]
+            bullet_manager.update()
             move_circle_player(testSurf, dx, dy, obstacle_manager)
-            gun_surf.world_x = testSurf.world_x+30
-            gun_surf.world_y = testSurf.world_y-20
-            update_zombie_movement()
+            zombie_manager.update_zombie_movement()
             
 
     # Handle movement in world coords
@@ -607,8 +715,9 @@ while c.GAME_IS_RUNNING:
     local_y = (testSurf.world_y % chunk_pixel_h) // tile_size
 
     mouse_x, mouse_y = pygame.mouse.get_pos()
-    ang = get_angle(mouse_x-1/2*info.current_w, mouse_y-1/2*info.current_h)
-    testSurf.scaled_image = pygame.transform.rotate(testSurf.original_image, -ang-90)
+    ang = get_angle(mouse_x-1/2*info.current_w, mouse_y-1/2*info.current_h)+90
+    testSurf.scaled_image = pygame.transform.rotate(testSurf.original_image, -ang)
+    update_gun_position(testSurf, gun_surf, ang, 30)
     
     #print(ang)
     #testSurf.image = pygame.transform.rotate(testSurf.image, ang)
