@@ -29,6 +29,10 @@ class Surface(SpriteHandler):
 class RectSprite(SpriteHandler):
     def __init__(self, x, y, w, h, color, *groups, **kwargs):
         super().__init__(*groups, **kwargs)
+        self.x = x
+        self.y = y
+        self.w = w
+        self.h = h
         
         # Create a Surface of the given width/height
         self.image = pygame.Surface((w, h))
@@ -36,14 +40,16 @@ class RectSprite(SpriteHandler):
         # Fill the entire Surface with the given color
         self.image.fill(color)
 
+        self.original_image = self.image
+
         # Position the sprite on-screen at (x, y)
         self.rect = pygame.Rect(x, y, w, h)
 
 class textSurface(SpriteHandler):
-    def __init__(self, *groups):
+    def __init__(self, text="placeholder", *groups):
         super().__init__(*groups)
         self.font = pygame.font.SysFont('Comic Sans MS', 30)
-        self.text = "cuh"
+        self.text = text
         self.image = self.font.render(str(self.text), False, (0, 0, 255), (0,0,0))
 
         self.rect = self.image.get_rect()
@@ -51,4 +57,3 @@ class textSurface(SpriteHandler):
     def update_text(self, text):
         self.text = text
         self.image = self.font.render(str(self.text), False, (0, 0, 255), (0,0,0))
-        self.rect = self.image.get_rect()

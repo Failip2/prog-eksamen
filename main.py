@@ -2,13 +2,14 @@ import pygame
 import config as c
 import os
 import surface
-from collections import Counter
 import noiseGen
 import math
 from pygame.locals import *
 import random
 import heapq
 import music
+import time
+import save
 
 pygame.init()
 pygame.font.init()
@@ -99,13 +100,23 @@ class Bullet(pygame.sprite.Sprite):
         
         for zomb in zombie_manager.zomb_list:
             if circle_collision(zomb, self):
-                zombie_manager.zomb_list.remove(zomb)
-                zomb.kill()
+                zomb.health-= c.AK47_DMG + c.AK47_DMG/4*random.random()
+                if zomb.health <= 0:
+                    updateScore(1)
+                    zomb.kill()
+                    zombie_manager.zomb_list.remove(zomb)
                 self.kill()
 
         # If no collision, update the position
         self.world_x += self.dx
         self.world_y += self.dy
+
+def updateScore(amt):
+    global total_score
+    total_score+=amt
+
+    scoreText.update_text(total_score)
+
 
 class BulletManager:
     def __init__(self):
@@ -113,31 +124,54 @@ class BulletManager:
 
     def shoot(self, x, y, angle, speed):
         bullet = Bullet(x, y, angle, speed)
+        music.sound_manager.playSound("ak47")
         self.bullets.add(bullet)
 
     def update(self):
         self.bullets.update()
 
 class Zombie(surface.Surface):
-    def __init__(self, imageUrl, size, world_x, world_y, radius, *groups):
+    def __init__(self, imageUrl, size, world_x, world_y, radius, health, cooldown, *groups):
         super().__init__(imageUrl, size, world_x, world_y, *groups)
         self.world_x = world_x
-        self.world_y = world_y 
+        self.world_y = world_y
+        self.health = health
+        self.cooldown = cooldown
+        self.time_last_attack = time.time()
 
         self.radius = radius
         self.path = None
-        #zombListTest.append(new_zomb)
 
 class ZombieManager:
     def __init__(self):
         self.zomb_list = []
 
-    def add_zombie(self, x, y, zombie=None):
+    def add_zombie(self, center_x, center_y, zombie=None):
+        def get_x_and_y():
+            while True:
+                x, y = random_point_on_circle(center_x, center_y, c.ZOMBIE_SPAWN_DISTANCE)
+                if can_move_to(x, y, obstacle_manager):
+                    return x, y
         if zombie is None:
-            self.zomb_list.append(Zombie("assets/img/zomb.png", (c.ZOMBIE_RADIUS*2, c.ZOMBIE_RADIUS*2), x, y, c.ZOMBIE_RADIUS, playerGroup))
+
+            x, y = get_x_and_y()              
+            self.zomb_list.append(Zombie("assets/img/zomb.png", (c.ZOMBIE_RADIUS*2, c.ZOMBIE_RADIUS*2), x, y, c.ZOMBIE_RADIUS, c.ZOMBIE_HEALTH, c.ZOMBIE_COOLDOWN, playerGroup))
             return
         
         self.zomb_list.append(zombie)
+    
+    def check_for_player_collision(self, player, zombie):
+        if circle_collision(player, zombie, c.ZOMBIE_REACH):
+            current_time = time.time()
+            if current_time-zombie.time_last_attack >= zombie.cooldown:
+                #music.sound_manager.playSound("zombie")
+                zombie.time_last_attack = current_time
+                player.health -= c.ZOMBIE_DAMAGE + c.ZOMBIE_DAMAGE/3*random.random()
+                if player.health <= 0:
+                    c.GAME_IS_RUNNING = False
+                    return # Do dead stuff
+                health_bar.image = pygame.Surface((health_bar.w*player.health/c.PLAYER_HEALTH, health_bar.h))
+                health_bar.image.fill((255, 0, 0))
     
     def update_zombie_movement(self):
         player_pos = (testSurf.world_x, testSurf.world_y)
@@ -162,13 +196,18 @@ class ZombieManager:
                 next_tile_world = (next_tile[0]*10, next_tile[1]*10)
                 # Move zombie towards next_tile (instant move or interpolate movement here)
 
-                dx, dy = compute_move_towards(zombie_position, next_tile_world, c.PLAYER_SPEED+random.randint(0, 7))
+                dx, dy = compute_move_towards(zombie_position, next_tile_world, c.ZOMBIE_SPEED+random.randint(0, 7))
                 
                 zombie.world_x += dx
                 zombie.world_y += dy
                 # If reached the next tile, remove it from path
                 if zombie_position == next_tile_world:
                     zombie.path.pop(0)
+            
+            self.check_for_player_collision(testSurf, zombie)
+                
+
+            
 
 class ChunkManager:
     def __init__(self, chunk_width_tiles=50, chunk_height_tiles=50,
@@ -223,8 +262,6 @@ class ChunkManager:
         # Potentially cull or just draw all for demonstration
         for (cx, cy), chunk in self.chunks.items():
             if abs(cx - camera_cx) > 4 or abs(cy - camera_cy) > 4:
-                #print("skipped chunk with coords: "+str(cx)+": "+str(cy))
-                #print("player pos is: "+str(camera_cx)+": "+str(camera_cy))
                 continue
 
             # Where does this chunk appear on screen?
@@ -246,7 +283,7 @@ class ChunkManager:
                 # no scaling needed
                 zoomSurf.blit(chunk.surface, (screen_x, screen_y))
 
-def circle_collision(spriteA, spriteB):
+def circle_collision(spriteA, spriteB, extraRadius = 0):
     """
     Returns True if spriteA and spriteB collide based on their circular bounding boxes.
     The sprites should have the attributes: world_x, world_y, and radius.
@@ -261,7 +298,7 @@ def circle_collision(spriteA, spriteB):
     distance = math.sqrt(dx**2 + dy**2)
 
     # Get the sum of the radii of both circles
-    radius_sum = spriteA.radius + spriteB.radius
+    radius_sum = spriteA.radius + spriteB.radius + extraRadius
 
     # If the distance is less than or equal to the sum of the radii, they are colliding
     return distance <= radius_sum
@@ -323,7 +360,6 @@ class Pathfinder:
             local_x += self.chunk_size
         if local_y < 0:
             local_y += self.chunk_size
-        #print(local_y, local_x)
         return not chunk.collision_map[local_y][local_x]
 
     def find_path(self, start_world, goal_world):
@@ -383,6 +419,10 @@ class Pathfinder:
         return []
 
 
+total_score = 0  
+scoreSaveArr = save.getRawData("saves/score.pickle")
+highscore = dict(scoreSaveArr).get("Highscore", 0)
+print(highscore)
 
 chunk_manager = ChunkManager(chunk_width_tiles=50, chunk_height_tiles=50,
                                  tile_size=10, scale=150.0, seed=42)
@@ -401,15 +441,24 @@ zombie_manager = ZombieManager()
 ########################################
 gun_surf = surface.Surface("assets/img/ak47.png", (25, 112.5), info.current_w // 2, info.current_h // 2, playerGroup)
 
-testSurf = surface.Surface("assets/img/zomb.png", (100, 100), info.current_w // 2, info.current_h // 2, playerGroup)
-
-gun_surf.rect.midbottom = (testSurf.world_x, testSurf.world_y)
+testSurf = surface.Surface("assets/img/player.png", (c.PLAYER_RADIUS*2, c.PLAYER_RADIUS*2), info.current_w // 2, info.current_h // 2, playerGroup)
+testSurf.health = c.PLAYER_HEALTH
+testSurf.radius = c.PLAYER_RADIUS
 
 musicTest = music.MusicWithQueue("main")
 musicTest.playMusic()
 
+health_bar = surface.RectSprite(0, 0, 300, 50, (255, 0, 0))
+health_bar.rect.topright = (info.current_w - 50, 50)
+
 # For demonstration, a text surface
-testText = surface.textSurface()
+fps_text = surface.textSurface()
+
+titleText = surface.textSurface(text="Goonz Royale")
+titleText.rect.midtop = (info.current_w/2, 0)
+
+scoreText = surface.textSurface(text=str(total_score))
+scoreText.rect.midbottom = (info.current_w/2, info.current_h)
 
 ########################################
 # Function to scale everything ONCE
@@ -499,7 +548,7 @@ def circle_vs_aabb(cx, cy, r, box_x, box_y, box_w, box_h):
 
 
 
-def update_gun_position(player, gun_surf, rotation_angle, offset_distance=30):
+def update_gun_position(player, gun_surf, rotation_angle, offset_distance=35):
     """
     Updates the gun's position relative to the player and rotates the gun to face the player's direction.
 
@@ -645,6 +694,9 @@ def draw_all():
     # 3) Draw text
     for t in surface.textSurface.instances:
         zoomSurf.blit(t.image, t.rect)
+    
+    for r in surface.RectSprite.instances:
+        zoomSurf.blit(r.image, r.rect)
 
 
 
@@ -653,7 +705,7 @@ def draw_all():
 # PyGame Custom Userevents
 ########################################
 zombie_spawn_event = pygame.USEREVENT+1
-pygame.time.set_timer(zombie_spawn_event, 1000)
+pygame.time.set_timer(zombie_spawn_event, c.ZOMBIE_SPAWN_DELAY_MS)
 
 game_tick_event = pygame.USEREVENT+2
 pygame.time.set_timer(game_tick_event, math.floor(1000/60))
@@ -675,17 +727,16 @@ while c.GAME_IS_RUNNING:
         elif event.type == pygame.KEYUP:
             # Press SPACE to zoom in
             if event.key == pygame.K_SPACE:
-                bullet_manager.shoot(gun_surf.world_x, gun_surf.world_y, gun_surf.angle, 10)  # shoot bullets
+                bullet_manager.shoot(gun_surf.world_x, gun_surf.world_y, gun_surf.angle, 15)  # shoot bullets
                 
-                """Example of how the zoom function could work"""
+                """Example of how the zoom function could work if Space is pressed"""
                 #c.ZOOM_FACTOR += 0.05
                 # Only re-scale once, not every frame
                 #rescale_all(c.ZOOM_FACTOR)
         
         elif event.type == zombie_spawn_event:
             if len(Zombie.instances)<c.ZOMBIES_PER_WAVE:
-                world_x, world_y = random_point_on_circle(testSurf.world_x, testSurf.world_y, c.ZOMBIE_SPAWN_DISTANCE)
-                zombie_manager.add_zombie(world_x, world_y)
+                zombie_manager.add_zombie(testSurf.world_x, testSurf.world_y)
             
         elif event.type == game_tick_event:
             keys = pygame.key.get_pressed()
@@ -717,20 +768,11 @@ while c.GAME_IS_RUNNING:
     mouse_x, mouse_y = pygame.mouse.get_pos()
     ang = get_angle(mouse_x-1/2*info.current_w, mouse_y-1/2*info.current_h)+90
     testSurf.scaled_image = pygame.transform.rotate(testSurf.original_image, -ang)
-    update_gun_position(testSurf, gun_surf, ang, 30)
+    update_gun_position(testSurf, gun_surf, ang, 50)
     
-    #print(ang)
-    #testSurf.image = pygame.transform.rotate(testSurf.image, ang)
-    
-
-
-    # ... rest of game loop ...
-
     #biome = pchunk.biome_data[local_y][local_x] 
     #collision_map = obs_chunk.collision_map[local_y][local_x]
 
-    #print(collision_map)
-    #print(biome)
 
     for nx in [cx-2, cx-1, cx, cx+1, cx+2]:
         for ny in [cy-2, cy-1, cy, cy+1, cy+2]:
@@ -746,10 +788,13 @@ while c.GAME_IS_RUNNING:
     #screen.blit(s, (0,0))
 
     # Update text surfaces
-    for t in surface.textSurface.instances:
-        t.update_text(math.floor(clock.get_fps()))
+    fps_text.update_text("FPS: "+str(math.floor(clock.get_fps())))
 
     pygame.display.flip()
     clock.tick()
+
+
+highscore_save = max(total_score, highscore)
+save.saveData("saves/score.pickle", {("Highscore", highscore_save)})
 
 pygame.quit()

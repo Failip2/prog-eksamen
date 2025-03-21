@@ -21,7 +21,7 @@ class MusicWithQueue:
 
     def __init__(self, channel) -> None:
         self.channel = channels[channel]
-        self.channel.set_volume(0.05)
+        self.channel.set_volume(0.2)
         self.channelKeyName = list(channels.keys())[list(channels.values()).index(self.channel)]
         self.soundArray = self.defineMusicArray(self.channelKeyName)
         self.PLAY_MUSIC = False
@@ -59,11 +59,10 @@ def getRandomMusic(musicArr):
 
 pygame.mixer.init(frequency = 44100, size = -16, channels = 4, buffer = 2**12)
 
-#sound_manager = SoundsManager
+sound_manager = SoundsManager()
 
-#sound_manager.createSound("bellSound", "sfx/sounds/1.mp3")
-#sound_manager.reateSound("gun", "sfx/sounds/gun.mp3")
-#sound_manager.createSound("knife", "sfx/sounds/knife.mp3")
+sound_manager.createSound("ak47", "assets/sfx/sounds/ak47.mp3")
+sound_manager.createSound("zombie", "assets/sfx/sounds/zombie.mp3")
 
 channels = {
     "main": pygame.mixer.Channel(0),
