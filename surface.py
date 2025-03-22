@@ -1,6 +1,8 @@
 import pygame
 from weakref import WeakSet
 
+_texture_cache = {}
+
 class SpriteHandler(pygame.sprite.Sprite):
     def __new__(cls, *args, **kwargs):
         instance = object.__new__(cls)
@@ -16,10 +18,10 @@ class SpriteHandler(pygame.sprite.Sprite):
 class Surface(SpriteHandler):
     def __init__(self, imageUrl, size, world_x=0, world_y=0, *groups):
         super().__init__(*groups)
-        self.image = pygame.transform.scale(
-            pygame.image.load(imageUrl).convert_alpha(),
-            size
-        )
+        if imageUrl not in _texture_cache:
+            _texture_cache[imageUrl] = pygame.transform.scale(pygame.image.load(imageUrl).convert_alpha(), size)
+        self.original_image = _texture_cache[imageUrl]
+        self.image = self.original_image
         self.world_x = world_x
         self.world_y = world_y
         self.rect = self.image.get_rect()

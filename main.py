@@ -2,7 +2,6 @@ import pygame
 import config as c
 import os
 import surface
-import noiseGen
 import math
 from pygame.locals import *
 import random
@@ -10,6 +9,9 @@ import heapq
 import music
 import time
 import save
+import game_chunks
+import types
+from itertools import count
 
 pygame.init()
 pygame.font.init()
@@ -39,39 +41,12 @@ map_width = math.ceil(info.current_w / tile_size)
 scale = 10.0
 
 # Generate a biome map
-biome_map = noiseGen.get_biome_map(map_width, map_height, scale)
+#biome_map = noiseGen.get_biome_map(map_width, map_height, scale)
 
 # Sprite groups
 playerGroup = pygame.sprite.RenderUpdates()
 zombListTest = []
 
-def generate_island_surface(cx, cy, chunk_w=50, chunk_h=50, tile_size=10, scale=15.0, isBiomeMap=True):
-    offset_x = cx * chunk_w  # chunk coords -> tile offset
-    offset_y = cy * chunk_h
-    biome_data, collision_map = noiseGen.get_biome_map(chunk_w,chunk_h, scale, 
-                                        offset_x, offset_y, isBiomeMap=isBiomeMap)
-
-    chunk_pixel_w = chunk_w * tile_size
-    chunk_pixel_h = chunk_h * tile_size
-    surf = pygame.Surface((chunk_pixel_w, chunk_pixel_h)).convert_alpha()
-
-    for j in range(chunk_h):
-        for i in range(chunk_w):
-            rect = pygame.Rect(i*tile_size, j*tile_size, tile_size, tile_size)
-            surf.fill(biome_data[j][i], rect)
-
-    chunk_rect = pygame.Rect(cx*chunk_pixel_w, cy*chunk_pixel_h, chunk_pixel_w, chunk_pixel_h)
-    return surf, chunk_rect, biome_data, collision_map
-
-
-class Chunk:
-    def __init__(self, cx, cy, surface, rect, biome_data, collision_map):
-        self.cx = cx
-        self.cy = cy
-        self.surface = surface
-        self.rect = rect
-        self.biome_data = biome_data
-        self.collision_map = collision_map 
 
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y, angle, speed, bullet_size = 5):
@@ -95,13 +70,16 @@ class Bullet(pygame.sprite.Sprite):
 
         # Check if the next position is walkable
         if not can_move_to(new_pos_x, new_pos_y, obstacle_manager):
+            music.sound_manager.playSound("bullet_wall")
             self.kill()  # Kill the bullet if it hits an obstacle
             return
         
         for zomb in zombie_manager.zomb_list:
             if circle_collision(zomb, self):
+                music.sound_manager.playSound("zomb_hit")
                 zomb.health-= c.AK47_DMG + c.AK47_DMG/4*random.random()
                 if zomb.health <= 0:
+                    music.sound_manager.playSound("zomb_death")
                     updateScore(1)
                     zomb.kill()
                     zombie_manager.zomb_list.remove(zomb)
@@ -121,11 +99,16 @@ def updateScore(amt):
 class BulletManager:
     def __init__(self):
         self.bullets = pygame.sprite.Group()
+        self.time_since_last_bullet = 0
 
     def shoot(self, x, y, angle, speed):
-        bullet = Bullet(x, y, angle, speed)
-        music.sound_manager.playSound("ak47")
-        self.bullets.add(bullet)
+        current_time = time.time()
+
+        if current_time-self.time_since_last_bullet > 1/(c.AK47_RPM/60):
+            bullet = Bullet(x, y, angle, speed)
+            music.sound_manager.playSound("ak47")
+            self.bullets.add(bullet)
+            self.time_since_last_bullet = current_time
 
     def update(self):
         self.bullets.update()
@@ -142,9 +125,17 @@ class Zombie(surface.Surface):
         self.radius = radius
         self.path = None
 
+        self.path_update_interval = 0.5  # Base seconds between updates
+        self.last_path_update = 0
+
+        self.path_update_interval += random.uniform(-0.1, 0.1)
+
 class ZombieManager:
     def __init__(self):
         self.zomb_list = []
+
+    def add_new_path_task(self, zombie, zombie_position, player_pos):
+        zombie.path = pathfinder.find_path(zombie_position, player_pos)
 
     def add_zombie(self, center_x, center_y, zombie=None):
         def get_x_and_y():
@@ -164,124 +155,62 @@ class ZombieManager:
         if circle_collision(player, zombie, c.ZOMBIE_REACH):
             current_time = time.time()
             if current_time-zombie.time_last_attack >= zombie.cooldown:
-                #music.sound_manager.playSound("zombie")
+                music.sound_manager.playSound("zombie")
                 zombie.time_last_attack = current_time
                 player.health -= c.ZOMBIE_DAMAGE + c.ZOMBIE_DAMAGE/3*random.random()
+
                 if player.health <= 0:
                     c.GAME_IS_RUNNING = False
                     return # Do dead stuff
+                
                 health_bar.image = pygame.Surface((health_bar.w*player.health/c.PLAYER_HEALTH, health_bar.h))
                 health_bar.image.fill((255, 0, 0))
     
     def update_zombie_movement(self):
+        current_time = time.time()
         player_pos = (testSurf.world_x, testSurf.world_y)
+        
         for zombie in self.zomb_list:
-            zombie_position = (zombie.world_x, zombie.world_y)
-            # Determine if we need to update the path for this zombie
-            if zombie.path == [] or not zombie.path: 
-                # no current path, compute one
-                zombie.path = pathfinder.find_path(zombie_position, player_pos)
-                zombie.target_last_seen = player_pos
-            else:
-                # If player has moved far from last seen position or at regular intervals, recompute path
-                dist_to_last = math.hypot(player_pos[0] - zombie.target_last_seen[0],
-                                        player_pos[1] - zombie.target_last_seen[1])
-                if dist_to_last > 125:  # example threshold in tiles
-                    zombie.path = pathfinder.find_path(zombie_position, player_pos)
-                    zombie.target_last_seen = player_pos
-
-            # If a path exists, move the zombie along the path
-            if zombie.path:
-                next_tile = zombie.path[0]
-                next_tile_world = (next_tile[0]*10, next_tile[1]*10)
-                # Move zombie towards next_tile (instant move or interpolate movement here)
-
-                dx, dy = compute_move_towards(zombie_position, next_tile_world, c.ZOMBIE_SPEED+random.randint(0, 7))
+            # Only recalculate path if cooldown expired
+            if current_time - zombie.last_path_update > zombie.path_update_interval:
+                self.update_zombie_path(zombie, player_pos)
+                zombie.last_path_update = current_time
                 
-                zombie.world_x += dx
-                zombie.world_y += dy
-                # If reached the next tile, remove it from path
-                if zombie_position == next_tile_world:
-                    zombie.path.pop(0)
-            
+            self.move_zombie(zombie)
             self.check_for_player_collision(testSurf, zombie)
-                
 
-            
-
-class ChunkManager:
-    def __init__(self, chunk_width_tiles=50, chunk_height_tiles=50,
-                 tile_size=10, scale=15.0, seed=None, isBiomeMap=True):
-        """
-        :param chunk_width_tiles: # of tiles horizontally in each chunk
-        :param chunk_height_tiles: # of tiles vertically in each chunk
-        :param tile_size: pixel size of each tile (e.g., 10)
-        :param scale: Perlin scale factor
-        :param seed: for consistent noise
-        """
-        self.chunk_width_tiles = chunk_width_tiles
-        self.chunk_height_tiles = chunk_height_tiles
-        self.tile_size = tile_size
-        self.scale = scale
-        self.seed = seed
-        self.isBiomeMap = isBiomeMap
-
-        # Stores (cx, cy) -> Chunk instance
-        self.chunks = {}
-
-    def get_chunk(self, cx, cy):
-        """
-        Return the Chunk at (cx, cy). If it doesn't exist, generate it.
-        """
-        if (cx, cy) in self.chunks:
-            return self.chunks[(cx, cy)]
+    def update_zombie_path(self, zombie, player_pos):
+        """Handle path recalculation for a single zombie"""
+        zombie_position = (zombie.world_x, zombie.world_y)
+        
+        # Existing pathfinding logic
+        if zombie.path == [] or not zombie.path:
+            #zombie.path = pathfinder.find_path(zombie_position, player_pos)
+            task_queue.add_task(lambda: self.add_new_path_task(zombie, zombie_position, player_pos))
+            zombie.target_last_seen = player_pos
         else:
-            surface, rect, biome_data, collision_map = generate_island_surface(
-                cx=cx,
-                cy=cy,
-                chunk_w=self.chunk_width_tiles,
-                chunk_h=self.chunk_height_tiles,
-                tile_size=self.tile_size,
-                scale=self.scale,
-                isBiomeMap=self.isBiomeMap
-            )
-            new_chunk = Chunk(cx, cy, surface, rect, biome_data, collision_map)
-            self.chunks[(cx, cy)] = new_chunk
-            return new_chunk
+            dist_to_last = math.hypot(player_pos[0] - zombie.target_last_seen[0],
+                                    player_pos[1] - zombie.target_last_seen[1])
+            if dist_to_last > c.PATHFINDER_DISTANCE_FOR_RECALC:
+                task_queue.add_task(lambda: self.add_new_path_task(zombie, zombie_position, player_pos))
+                zombie.target_last_seen = player_pos
 
-    def draw_chunks(self, screen, camera_x, camera_y, screen_center, zoom=1.0):
-        """
-        Draw all loaded chunks that might be visible,
-        using a camera anchored at (camera_x, camera_y) in world coords,
-        so the camera is placed at screen_center with given zoom.
-        """
-
-        camera_cx = camera_x // chunk_pixel_w
-        camera_cy = camera_y // chunk_pixel_h
-
-        # Potentially cull or just draw all for demonstration
-        for (cx, cy), chunk in self.chunks.items():
-            if abs(cx - camera_cx) > 4 or abs(cy - camera_cy) > 4:
-                continue
-
-            # Where does this chunk appear on screen?
-            off_x = (chunk.rect.x - camera_x) * zoom
-            off_y = (chunk.rect.y - camera_y) * zoom
-            screen_x = screen_center[0] + off_x
-            screen_y = screen_center[1] + off_y
-
-            # Scale the chunk if you want chunk-based zoom
-            # For performance, you could store pre-scaled surfaces 
-            # or just do one big scale if the chunk is large.
-            # We'll do a naive approach for demonstration:
-            if zoom != 1.0:
-                scaled_w = int(chunk.rect.width * zoom)
-                scaled_h = int(chunk.rect.height * zoom)
-                scaled_surf = pygame.transform.scale(chunk.surface, (scaled_w, scaled_h))
-                zoomSurf.blit(scaled_surf, (screen_x, screen_y))
-            else:
-                # no scaling needed
-                zoomSurf.blit(chunk.surface, (screen_x, screen_y))
+    def move_zombie(self, zombie):
+        """Handle movement for a single zombie"""
+        if zombie.path:
+            next_tile = zombie.path[0]
+            next_tile_world = (next_tile[0]*10, next_tile[1]*10)
+            
+            dx, dy = compute_move_towards((zombie.world_x, zombie.world_y), 
+                                         next_tile_world, 
+                                         c.ZOMBIE_SPEED+random.randint(0, c.ZOMBIE_SPEED_VARIABILITY))
+            
+            zombie.world_x += dx
+            zombie.world_y += dy
+            
+            if (zombie.world_x, zombie.world_y) == next_tile_world:
+                zombie.path.pop(0)
+                
 
 def circle_collision(spriteA, spriteB, extraRadius = 0):
     """
@@ -302,6 +231,59 @@ def circle_collision(spriteA, spriteB, extraRadius = 0):
 
     # If the distance is less than or equal to the sum of the radii, they are colliding
     return distance <= radius_sum
+
+class TaskQueue:
+    def __init__(self, high_priority_cutoff=0):
+        self.high_queue = []
+        self.low_queue = []
+        self._counter = count()
+        self.high_priority_cutoff = high_priority_cutoff  # <= this value = high priority
+
+    def add_task(self, task, priority=0):
+        """Add task to appropriate queue based on priority"""
+        entry = (priority, next(self._counter), task)
+        if priority <= self.high_priority_cutoff:
+            heapq.heappush(self.high_queue, entry)
+        else:
+            heapq.heappush(self.low_queue, entry)
+
+    def _process_queue(self, queue, max_tasks):
+        tasks_run = 0
+        temp_requeue = []
+        
+        while queue and tasks_run < max_tasks:
+            priority, _, task = heapq.heappop(queue)
+            
+            # Handle generator tasks
+            if isinstance(task, types.GeneratorType):
+                try:
+                    next(task)
+                    # Requeue with original priority
+                    new_entry = (priority, next(self._counter), task)
+                    temp_requeue.append(new_entry)
+                except StopIteration:
+                    pass
+            else:
+                task()
+            
+            tasks_run += 1
+        
+        # Re-add paused generators to original queue
+        for entry in temp_requeue:
+            if entry[0] <= self.high_priority_cutoff:
+                heapq.heappush(self.high_queue, entry)
+            else:
+                heapq.heappush(self.low_queue, entry)
+        
+        return tasks_run
+
+    def process_tasks(self, max_high=0, max_low=0):
+        """Process up to max_high high-priority and max_low low-priority tasks"""
+        high_run = self._process_queue(self.high_queue, max_high)
+        low_run = self._process_queue(self.low_queue, max_low)
+        
+        print(f"High tasks: {high_run}, Low tasks: {low_run}")
+        return high_run + low_run
 
 def random_point_on_circle(center_x, center_y, radius):
     """
@@ -424,11 +406,12 @@ scoreSaveArr = save.getRawData("saves/score.pickle")
 highscore = dict(scoreSaveArr).get("Highscore", 0)
 print(highscore)
 
-chunk_manager = ChunkManager(chunk_width_tiles=50, chunk_height_tiles=50,
-                                 tile_size=10, scale=150.0, seed=42)
-obstacle_manager = ChunkManager(chunk_width_tiles=50, chunk_height_tiles=50,
-                                 tile_size=10, scale=10.0, seed=42, isBiomeMap=False)
+task_queue = TaskQueue(high_priority_cutoff=0)
 
+chunk_manager = game_chunks.ChunkManager(task_queue, chunk_width_tiles=50, chunk_height_tiles=50,
+                                 tile_size=10, scale=150.0, seed=42)
+obstacle_manager = game_chunks.ChunkManager(task_queue, chunk_width_tiles=50, chunk_height_tiles=50,
+                                 tile_size=10, scale=10.0, seed=42, isBiomeMap=False)
 
 pathfinder = Pathfinder(obstacle_manager, obstacle_manager.chunk_height_tiles, obstacle_manager.tile_size)
 
@@ -445,8 +428,10 @@ testSurf = surface.Surface("assets/img/player.png", (c.PLAYER_RADIUS*2, c.PLAYER
 testSurf.health = c.PLAYER_HEALTH
 testSurf.radius = c.PLAYER_RADIUS
 
-musicTest = music.MusicWithQueue("main")
+musicTest = music.MusicWithQueue()
 musicTest.playMusic()
+
+timeAtStart = time.time()
 
 health_bar = surface.RectSprite(0, 0, 300, 50, (255, 0, 0))
 health_bar.rect.topright = (info.current_w - 50, 50)
@@ -675,14 +660,13 @@ def draw_all():
         zoomSurf.blit(sp.scaled_image, (sx, sy))
 
     zoomSurf.fill((0,0,0))
-    chunk_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=c.ZOOM_FACTOR)
-    obstacle_manager.draw_chunks(screen, testSurf.world_x, testSurf.world_y, screen_center, zoom=c.ZOOM_FACTOR)
+    chunk_manager.draw_chunks(zoomSurf, testSurf.world_x, testSurf.world_y, screen_center, zoom=c.ZOOM_FACTOR)
+    obstacle_manager.draw_chunks(zoomSurf, testSurf.world_x, testSurf.world_y, screen_center, zoom=c.ZOOM_FACTOR)
     
     # We'll use the first player as the camera anchor
     player = testSurf
     camera_x = player.world_x
     camera_y = player.world_y
-
 
     for sp in bullet_manager.bullets.sprites():
         scale_and_blit_zoom_surface(sp)
@@ -726,17 +710,18 @@ while c.GAME_IS_RUNNING:
 
         elif event.type == pygame.KEYUP:
             # Press SPACE to zoom in
-            if event.key == pygame.K_SPACE:
-                bullet_manager.shoot(gun_surf.world_x, gun_surf.world_y, gun_surf.angle, 15)  # shoot bullets
-                
+            if event.key == pygame.K_SPACE:  
+                pass 
                 """Example of how the zoom function could work if Space is pressed"""
                 #c.ZOOM_FACTOR += 0.05
                 # Only re-scale once, not every frame
                 #rescale_all(c.ZOOM_FACTOR)
         
         elif event.type == zombie_spawn_event:
-            if len(Zombie.instances)<c.ZOMBIES_PER_WAVE:
-                zombie_manager.add_zombie(testSurf.world_x, testSurf.world_y)
+            if time.time()-timeAtStart > 5:
+                if len(Zombie.instances)<c.ZOMBIES_PER_WAVE:
+                    pass
+                    zombie_manager.add_zombie(testSurf.world_x, testSurf.world_y)
             
         elif event.type == game_tick_event:
             keys = pygame.key.get_pressed()
@@ -748,9 +733,12 @@ while c.GAME_IS_RUNNING:
             bullet_manager.update()
             move_circle_player(testSurf, dx, dy, obstacle_manager)
             zombie_manager.update_zombie_movement()
+
+            if keys[K_SPACE]:
+                bullet_manager.shoot(gun_surf.world_x, gun_surf.world_y, gun_surf.angle, 15)  # shoot bullets
             
 
-    # Handle movement in world coords
+    # Handle movement in world coordsself.counter = 0
 
 
 
@@ -773,14 +761,21 @@ while c.GAME_IS_RUNNING:
     #biome = pchunk.biome_data[local_y][local_x] 
     #collision_map = obs_chunk.collision_map[local_y][local_x]
 
-
-    for nx in [cx-2, cx-1, cx, cx+1, cx+2]:
+    for nx in [cx-3, cx-2, cx-1, cx, cx+1, cx+2, cx+3]:
         for ny in [cy-2, cy-1, cy, cy+1, cy+2]:
             chunk_manager.get_chunk(nx, ny)
             obstacle_manager.get_chunk(nx, ny)
+            #needed_chunks.append((nx, ny))
+    
+    chunk_manager.update_chunks(cx, cy)
+
+    task_queue.process_tasks(max_high=3, max_low=80)
+
+
 
     # Build the frame
     draw_all()
+
 
     
     # Blit the result to the screen
