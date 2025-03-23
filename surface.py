@@ -1,25 +1,36 @@
+# Filip har skrevet surface.py
+
 import pygame
 from weakref import WeakSet
 
+# Cache for storing loaded textures to avoid reloading them multiple times
 _texture_cache = {}
 
 class SpriteHandler(pygame.sprite.Sprite):
+    # WeakSet to keep track of all instances of SpriteHandler
+    instances = WeakSet()
+
     def __new__(cls, *args, **kwargs):
+        # Create a new instance of the class
         instance = object.__new__(cls)
+        # Ensure the instances WeakSet is initialized for the class
         if "instances" not in cls.__dict__:
             cls.instances = WeakSet()
+        # Add the new instance to the WeakSet
         cls.instances.add(instance)
         return instance
 
     def __init__(self, *groups, **kwargs):
+        # Initialize the parent class (pygame.sprite.Sprite)
         super().__init__(*groups)
-        
 
 class Surface(SpriteHandler):
     def __init__(self, imageUrl, size, world_x=0, world_y=0, *groups):
         super().__init__(*groups)
+        # Load and cache the image if it hasn't been loaded before
         if imageUrl not in _texture_cache:
             _texture_cache[imageUrl] = pygame.transform.scale(pygame.image.load(imageUrl).convert_alpha(), size)
+        # Set the image and its properties
         self.original_image = _texture_cache[imageUrl]
         self.image = self.original_image
         self.world_x = world_x
@@ -50,12 +61,28 @@ class RectSprite(SpriteHandler):
 class textSurface(SpriteHandler):
     def __init__(self, text="placeholder", *groups):
         super().__init__(*groups)
+        # Set the font and initial text
         self.font = pygame.font.SysFont('Comic Sans MS', 30)
         self.text = text
-        self.image = self.font.render(str(self.text), False, (0, 0, 255), (0,0,0))
+        # Render the text onto the image
+        self.image = self.font.render(str(self.text), False, (0, 0, 255), (0, 0, 0))
 
+        # Get the rectangle for positioning the text
         self.rect = self.image.get_rect()
     
     def update_text(self, text):
+        # Update the text and re-render the image
         self.text = text
-        self.image = self.font.render(str(self.text), False, (0, 0, 255), (0,0,0))
+        self.image = self.font.render(str(self.text), False, (0, 0, 255), (0, 0, 0))
+
+class staticImage(SpriteHandler):
+    def __init__(self, imageUrl, size, *groups):
+        super().__init__(*groups)
+
+        # Load and cache the image if it hasn't been loaded before
+        if imageUrl not in _texture_cache:
+            _texture_cache[imageUrl] = pygame.transform.scale(pygame.image.load(imageUrl).convert_alpha(), size)
+        # Set the image and its properties
+        self.original_image = _texture_cache[imageUrl]
+        self.image = self.original_image
+        self.rect = self.image.get_rect()
